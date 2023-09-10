@@ -1,0 +1,3 @@
+break main
+break parse.c:read_funcdef
+break lex.c:lex

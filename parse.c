@@ -2332,7 +2332,9 @@ static void backfill_labels() {
 
 static Node *read_funcdef() {
     int sclass = 0;
+    // 解析返回值类型
     Type *basetype = read_decl_spec_opt(&sclass);
+    // 创建函数的局部作用域
     localenv = make_map_parent(globalenv);
     gotos = make_vector();
     labels = make_map();

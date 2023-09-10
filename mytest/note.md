@@ -1,0 +1,135 @@
+# 8cc 笔记
+
+## 工具准备
+
+* 编码编辑器: Emacs
+* 编译器: GCC
+* 调试器: GDB + [gdb-dashboard](https://github.com/LiuYinCarl/gdb-dashboard)
+
+## 8cc 的启动流程
+
+以如下源代码为例
+
+```c
+// mytest/main.c
+
+int main() {
+	return 0;
+}
+```
+
+使用如下命令编译
+
+```bash
+./8cc -S -o main.asm main.c
+```
+
+那么启动时候的堆栈如下
+
+```gdb
+[0] from 0x0000555555564c28 in lex+8 at lex.c:597
+[1] from 0x0000555555557b78 in read_expand_newline+13 at cpp.c:328
+[2] from 0x0000555555557d68 in read_expand+18 at cpp.c:366
+[3] from 0x000055555555a6bb in read_token+13 at cpp.c:1006
+[4] from 0x000055555555a698 in peek_token+13 at cpp.c:998
+[5] from 0x000055555556e7e2 in peek+9 at parse.c:2750
+[6] from 0x000055555556e5d0 in read_toplevels+21 at parse.c:2707
+[7] from 0x000055555555a648 in read_from_string+37 at cpp.c:991
+[8] from 0x000055555555a52b in init_predefined_macros+394 at cpp.c:956
+[9] from 0x000055555555a5b1 in cpp_init+49 at cpp.c:968
+[10] from 0x0000555555556b20 in main+121 at main.c:173
+```
+
+需要注意的栈是
+
+```gdb
+[8] from 0x000055555555a52b in init_predefined_macros+394 at cpp.c:956
+```
+
+这个函数的源码如下
+
+```c
+// cpp.c
+
+static void init_predefined_macros() {
+    vec_push(std_include_path, BUILD_DIR "/include");
+    vec_push(std_include_path, "/usr/local/lib/8cc/include");
+    vec_push(std_include_path, "/usr/local/include");
+    vec_push(std_include_path, "/usr/include");
+    vec_push(std_include_path, "/usr/include/linux");
+    vec_push(std_include_path, "/usr/include/x86_64-linux-gnu");
+
+    define_special_macro("__DATE__", handle_date_macro);
+    define_special_macro("__TIME__", handle_time_macro);
+    define_special_macro("__FILE__", handle_file_macro);
+    define_special_macro("__LINE__", handle_line_macro);
+    define_special_macro("_Pragma",  handle_pragma_macro);
+    // [GNU] Non-standard macros
+    define_special_macro("__BASE_FILE__", handle_base_file_macro);
+    define_special_macro("__COUNTER__", handle_counter_macro);
+    define_special_macro("__INCLUDE_LEVEL__", handle_include_level_macro);
+    define_special_macro("__TIMESTAMP__", handle_timestamp_macro);
+
+    read_from_string("#include <" BUILD_DIR "/include/8cc.h>");
+}
+```
+
+这个函数做了三件事
+
+1. 将系统头文件路径放入 `std_include_path` 中，以供后续查找头文件
+2. 为一些特殊的标准宏和 GUN 拓展宏定义了处理函数
+3. 导入了 `/include/8cc.h` 这个头文件
+
+我们暂时只关注导入 `/include/8cc.h` 这个头文件。8cc 在启动任何编译时都把 `8cc.h` 这个头文件
+作为了隐式导入的第一个头文件。
+
+这一步可以很简单的进行验证。
+
+在 `include/8cc.h` 文件最后定义一个宏
+
+```c
+// include/8cc.h
+
+#define hello_8cc_h 10086
+```
+
+修改上面的 main.c 测试文件
+
+```c
+// mytest/mian.c
+
+int main() {
+  int x = hello_8cc_h;
+  return 0;
+}
+```
+
+编译后查看生产的 `main.asm` 文件
+
+```asm
+; mytest/main.asm
+
+	.text
+.global main
+main:
+	nop
+	push %rbp
+	mov %rsp, %rbp
+	sub $8, %rsp
+	.file 1 "main.c"
+	.loc 1 3 0
+	# }
+	.loc 1 2 0
+	#   return 0;
+	movl $10086, -8(%rbp) ; 这里可以看到我们定义的 hello_8cc_h 宏的值
+	.loc 1 3 0
+	# }
+	mov $0, %rax
+	cltq
+	leave
+	ret
+	leave
+	ret
+```
+
+查看 `include/8cc.h` 头文件，可以发现这个文件主要就是定义了一些常量。
