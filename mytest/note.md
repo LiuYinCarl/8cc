@@ -6,6 +6,58 @@
 * 编译器: GCC
 * 调试器: GDB + [gdb-dashboard](https://github.com/LiuYinCarl/gdb-dashboard)
 
+
+## 关注的问题
+
+1. 8cc 是不是单趟扫描，如果是的话，简要流程是什么
+2. 8cc 是否构建了符号表，符号表的作用是什么
+3. 8cc 的符号查找是怎么实现的
+4. 8cc 的 AST 和符号表有什么关系
+5. 8cc 如何依赖 AST 来生成汇编代码
+6. 8cc 生成汇编代码时如何处理条件/分支/循环语句
+
+
+## 时序图
+
+### 源代码到汇编时序图
+
+```txt
+.
+|
+|- parseopt(argc, argv) 解析程序输入参数
+|
+|- lex_init(infile) 词法分析器初始化
+|  |
+|  |- stream_push(make_file(fp, filename)) 输入源文件存入 files 数组
+|
+|- cpp_init()
+|  |
+|  |- init_keywords() 初始化 C 语言关键字
+|  |
+|  |- init_now() 初始化当前时间信息
+|  |
+|  |- init_predefined_macros()
+|     |
+|     |- 常见系统 include 目录存入 std_include_path
+|     |
+|     |- define_special_macro() 定义特殊宏处理函数
+|     |
+|     |- read_from_string("#include <" BUILD_DIR "/include/8cc.h>") 加载 8cc.h
+|
+|- parse_init()
+|
+|- set_output_file(open_asmfile())
+|
+|- read_toplevels()
+|
+|- emit_toplevel()
+|
+|- close_output_file()
+|
+-
+```
+
+
 ## 8cc 的启动流程
 
 以如下源代码为例
@@ -133,3 +185,7 @@ main:
 ```
 
 查看 `include/8cc.h` 头文件，可以发现这个文件主要就是定义了一些常量。
+
+## 汇编
+
+8cc 直接使用了 as 作为汇编器，可以在 `main` 函数中找到相关代码。
