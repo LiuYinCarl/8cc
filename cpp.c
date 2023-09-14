@@ -994,16 +994,20 @@ void read_from_string(char *buf) {
     stream_unstash();
 }
 
+// 获取下一个 Token 的副本
 Token *peek_token() {
     Token *r = read_token();
     unget_token(r);
     return r;
 }
 
+// 获取下一个 Token
 Token *read_token() {
     Token *tok;
     for (;;) {
         tok = read_expand();
+	// 如果下一个 Token 是 '#'，并且这个时候没有被宏屏蔽
+	// 那么就读入 include 的头文件
         if (tok->bol && is_keyword(tok, '#') && tok->hideset == NULL) {
             read_directive(tok);
             continue;

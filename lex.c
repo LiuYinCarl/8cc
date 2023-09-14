@@ -27,14 +27,16 @@
 #include <string.h>
 #include "8cc.h"
 
-static Vector *buffers = &EMPTY_VECTOR;
-static Token *space_token = &(Token){ TSPACE };
-static Token *newline_token = &(Token){ TNEWLINE };
-static Token *eof_token = &(Token){ TEOF };
+// TODO 这里使用多个 buffer 的原因是不是因为 include 的时候，会存在多个文件
+// 每个文件的读取进度不同, 所以对每个正在解析的文件都需要一个 buffer?
+static Vector *buffers = &EMPTY_VECTOR;             // Token 缓冲池列表
+static Token *space_token = &(Token){ TSPACE };     // 特殊 Token, 表示空白字符
+static Token *newline_token = &(Token){ TNEWLINE }; // 特殊 Token, 表示换行
+static Token *eof_token = &(Token){ TEOF };         // 特殊 Token, 表示文件解析完了
 
 typedef struct {
-    int line;
-    int column;
+    int line;   // 行
+    int column; // 列
 } Pos;
 
 static Pos pos;
@@ -49,6 +51,8 @@ static char *pos_string(Pos *p) {
 
 static void skip_block_comment(void);
 
+// 词法解析器初始化, 如果没有指定 filename, 就从标准输入
+// 读取内容作为词法分析器输入, 否则, 从 filename 文件读取
 void lex_init(char *filename) {
     vec_push(buffers, make_vector());
     if (!strcmp(filename, "-")) {
@@ -66,6 +70,8 @@ static Pos get_pos(int delta) {
     return (Pos){ f->line, f->column + delta };
 }
 
+// 将 pos 设置位当前读到的文件位置
+// TODO 这是为了错误回退？
 static void mark() {
     pos = get_pos(0);
 }
@@ -422,10 +428,18 @@ static Token *read_hash_digraph() {
     return NULL;
 }
 
+// 如果下一个字符是 expect, 则消费掉下一个字符,
+// 然后返回类型 t1, 否则返回类型 els
 static Token *read_rep(char expect, int t1, int els) {
     return make_keyword(next(expect) ? t1 : els);
 }
 
+// 如果下一个字符是 expect1, 则消费掉下一个字符,
+// 然后返回类型 t1. 否则如果下一个字符是 expect2,
+// 则消费掉下一个字符，并返回类型 t2, 否则不消费字符,
+// 并返回 els, 这个过程最多只消费一个字符
+// * 消费下一个字符, 返回 t1 or t2
+// * 不消费字符, 返回 els
 static Token *read_rep2(char expect1, int t1, char expect2, int t2, char els) {
     if (next(expect1))
         return make_keyword(t1);
@@ -433,13 +447,14 @@ static Token *read_rep2(char expect1, int t1, char expect2, int t2, char els) {
 }
 
 static Token *do_read_token() {
+    // 如果跳过了空白符号(或注释), 则返回 SPACE Token
     if (skip_space())
         return space_token;
     mark();
     int c = readc();
     switch (c) {
     case '\n': return newline_token;
-    case ':': return make_keyword(next('>') ? ']' : ':');
+    case ':': return make_keyword(next('>') ? ']' : ':'); // ':>' 等价于 ']', 古老用法
     case '#': return make_keyword(next('#') ? KHASHHASH : '#');
     case '+': return read_rep2('+', OP_INC, '=', OP_A_ADD, '+');
     case '*': return read_rep('=', OP_A_MUL, '*');
@@ -494,7 +509,7 @@ static Token *do_read_token() {
     case '<':
         if (next('<')) return read_rep('=', OP_A_SAL, OP_SAL);
         if (next('=')) return make_keyword(OP_LE);
-        if (next(':')) return make_keyword('[');
+        if (next(':')) return make_keyword('['); // '<:' 等价于 '[', 古老用法
         if (next('%')) return make_keyword('{');
         return make_keyword('<');
     case '>':
@@ -593,15 +608,16 @@ Token *lex_string(char *s) {
     return r;
 }
 
+// 词法分析器返回下一个 Token
 Token *lex() {
     Vector *buf = vec_tail(buffers);
-    if (vec_len(buf) > 0)
+    if (vec_len(buf) > 0) // 当前 buffer 中还有 Token, 直接返回最后一个 Token
         return vec_pop(buf);
-    if (vec_len(buffers) > 1)
+    if (vec_len(buffers) > 1) // 当前 buffer 为空并且不是唯一的 buffer，说明当前这个文件解析完了,返回 EOF
         return eof_token;
-    bool bol = (current_file()->column == 1);
-    Token *tok = do_read_token();
-    while (tok->kind == TSPACE) {
+    bool bol = (current_file()->column == 1); // 是否是 begin of line
+    Token *tok = do_read_token(); // 读取一个 Token
+    while (tok->kind == TSPACE) { // 不停读取，直到下一个 Token 不为空白字符
         tok = do_read_token();
         tok->space = true;
     }

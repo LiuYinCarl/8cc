@@ -102,6 +102,10 @@ static int get() {
     return c;
 }
 
+// 读取下一个字符, 跳过 '\n'
+// 读到 EOF 的时候, 如果当前是最后一个文件,
+// 则返回 EOF, 否则跳过并继续从另一个文件读取
+// TODO 为什么要跳过 '\n'
 int readc() {
     for (;;) {
         int c = get();

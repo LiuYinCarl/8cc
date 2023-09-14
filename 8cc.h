@@ -21,8 +21,8 @@ enum {
     TINVALID,
     // Only in CPP
     MIN_CPP_TOKEN,
-    TNEWLINE,
-    TSPACE,
+    TNEWLINE,  // 换行
+    TSPACE,    // 空白字符或者注释
     TMACRO_PARAM,
 };
 

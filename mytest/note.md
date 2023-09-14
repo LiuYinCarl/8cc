@@ -19,42 +19,105 @@
 
 ## 时序图
 
+使用 `|+` 表示多个过程具有时序关系。
+
+```txt
+.
+|+ func1()
+|
+|+ func2()
+```
+
+使用 `|-` 表示多个过程具有 OR 的关系，每次只执行其中一个。
+```txt
+.
+|- func1()
+|
+|- func2()
+```
+
+使用 `|?` 表示可能存在的过程，需要根据条件决定是否执行。
+```txt
+.
+|? func1()
+```
+
 ### 源代码到汇编时序图
 
 ```txt
 .
 |
-|- parseopt(argc, argv) 解析程序输入参数
+|+ parseopt(argc, argv) 解析程序输入参数
 |
-|- lex_init(infile) 词法分析器初始化
+|+ lex_init(infile) 词法分析器初始化
 |  |
-|  |- stream_push(make_file(fp, filename)) 输入源文件存入 files 数组
+|  |+ stream_push(make_file(fp, filename)) 输入源文件存入 files 数组
 |
-|- cpp_init()
+|+ cpp_init()
 |  |
-|  |- init_keywords() 初始化 C 语言关键字
+|  |+ init_keywords() 初始化 C 语言关键字
 |  |
-|  |- init_now() 初始化当前时间信息
+|  |+ init_now() 初始化当前时间信息
 |  |
-|  |- init_predefined_macros()
+|  |+ init_predefined_macros()
 |     |
-|     |- 常见系统 include 目录存入 std_include_path
+|     |+ 常见系统 include 目录存入 std_include_path
 |     |
-|     |- define_special_macro() 定义特殊宏处理函数
+|     |+ define_special_macro() 定义特殊宏处理函数
 |     |
-|     |- read_from_string("#include <" BUILD_DIR "/include/8cc.h>") 加载 8cc.h
+|     |+ read_from_string("#include <" BUILD_DIR "/include/8cc.h>") 加载 8cc.h
 |
-|- parse_init()
+|+ parse_init()
+|  |
+|  |+ define_builtin() 定义了 4 个特殊的内建函数，作为 ast_gvars 存入 globalenv
 |
-|- set_output_file(open_asmfile())
+|+ set_output_file(open_asmfile())
 |
-|- read_toplevels()
+|+ read_toplevels()
+|  |
+|  |+ vec_push(toplevels, read_funcdef()) 读入函数定义
+|  |
+|  |+ read_decl(toplevels, true) 读入非函数定义，struct 之类
 |
-|- emit_toplevel()
+|+ emit_toplevel()
 |
-|- close_output_file()
+|+ close_output_file()
 |
 -
+```
+
+## 构建 AST 流程图
+
+构建 AST 的过程是从 `read_toplevels` 函数开始进行。
+
+```txt
+read_toplevels
+|
+|- read_funcdef() 读到函数定义会放入 Vector toplevels
+|  |
+|  |+ read_decl_spec_opt()
+|  |  |
+|  |  |? read_decl_spec()
+|  |
+|  |+ make_map_parent(globalenv) 创建局部作用域，父作用域为 globalenv
+|  |
+|  |+ read_declarator() 读取函数定义(TODO: 这里有一个新旧式函数定义的区别)
+|  |
+|  |+ ast_gvar(functype, name) 函数名存入 globalenv
+|  |
+|  |? read_func_body(functype, name, params) 读取函数体定义
+|  |
+|  |+ backfill_labels() 填充 labels(用于 goto)
+|
+|- read_decl() 读到其他结构定义也放入 Vector toplevels
+
+
+```
+
+## AST 生成汇编代码流程图
+
+```txt
+
 ```
 
 

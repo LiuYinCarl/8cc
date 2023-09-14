@@ -2028,7 +2028,7 @@ static int read_alignas() {
 static Type *read_decl_spec(int *rsclass) {
     int sclass = 0;
     Token *tok = peek();
-    if (!is_type(tok))
+    if (!is_type(tok)) // 这里期待下一个 Token 是个类型标识符
         errort(tok, "type name expected, but got %s", tok2s(tok));
 
     Type *usertype = NULL;
@@ -2286,6 +2286,13 @@ static void skip_parentheses(Vector *buf) {
 // parenthesis of a function parameter list, we were reading a function
 // definition. (Usually '{' comes after a closing parenthesis.
 // A type keyword is allowed for K&R-style function definitions.)
+// 这个函数用来判断当前是否位于一个函数定义的开头
+// 函数定义有两种形式
+// 常见形式 int foo(int a, int b) {}
+// K&R 形式 int foo(a, b)
+//              int a;
+//              int b;
+//          {}
 static bool is_funcdef() {
     Vector *buf = make_vector();
     bool r = false;
