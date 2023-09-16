@@ -2030,6 +2030,10 @@ static bool is_poweroftwo(int x) {
     return (x <= 0) ? false : !(x & (x - 1));
 }
 
+// 读取对齐的字节数, 字节对齐有两种写法
+// 1. _Alignas(类型名)
+// 2. _Alignas(一个返回整数的 const 表达式)
+// 完整例子参照 example/parse_2.c
 static int read_alignas() {
     // C11 6.7.5. Valid form of _Alignof is either _Alignas(type-name) or
     // _Alignas(constant-expression).
@@ -2064,6 +2068,9 @@ static Type *read_decl_spec(int *rsclass) {
         if (kind == 0 && tok->kind == TIDENT && !usertype) {
             Type *def = get_typedef(tok->sval); // 测试一下这个 Token 是不是被 typedef 的类型
             if (def) {
+                // 进入这个分支的完整示例 example/parse_1.c
+                // typedef int myint;
+                // myint foo;              // 解析到 myint 进入此分支
                 assert(usertype == false); // NOTE 添加一个 assert 验证下面的判断
                 if (usertype) goto err;    // TODO 这个 if 应该永远为 False, 上面的 if 已经判了
                 usertype = def;
@@ -2071,6 +2078,9 @@ static Type *read_decl_spec(int *rsclass) {
             }
         }
         if (tok->kind != TKEYWORD) {
+            // 进入这个分支的完整示例 example/parse_1.c
+            // typedef int myint;
+            // myint foo;         // 解析到 foo 发现不是关键字, 退回 Token
             unget_token(tok);
             break;
         }
@@ -2103,8 +2113,12 @@ static Type *read_decl_spec(int *rsclass) {
             // C11 6.7.5p6: alignas(0) should have no effect.
             if (val == 0)
                 break;
+            // 寻找一个最严格并且大于等于类型的默认对齐的 alignment, 例如
+            // _Alignas(4) _Alignas(2) int bar; 应该为 2 (这里暂不考虑 int)
+            // 完整例子 example/parse_3.c
             if (align == -1 || val < align)
                 align = val;
+            printf("align = %d, val = %d\n", align, val);
             break;
         }
         case KLONG: {
