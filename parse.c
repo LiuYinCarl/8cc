@@ -27,6 +27,13 @@ SourceLoc *source_loc;
 // Objects representing various scopes. Did you know C has so many different
 // scopes? You can use the same name for global variable, local variable,
 // struct/union/enum tag, and goto label!
+// 这里定义了 C 语言的各种作用域
+// 1. 全局作用域
+// 2. 局部作用域
+// 3. tags 作用域, 就是 struct 和 enum 的名字作用域，
+//    struct/enum 在同一个作用域下可以和函数/变量同名，就是因为
+//    struct/enum 使用了单独的 tags 作用域
+// 4. labels 作用域，给跳转标签使用的作用域
 static Map *globalenv = &EMPTY_MAP;
 static Map *localenv;
 static Map *tags = &EMPTY_MAP;
@@ -457,6 +464,10 @@ static Type *copy_incomplete_type(Type *ty) {
     return (ty->len == -1) ? copy_type(ty) : ty;
 }
 
+// 判断一个 Token 是不是 typedef 的
+// 例如下面 my_int 的真正类型应该为 int
+// typedef int my_int;
+// my_int a;
 static Type *get_typedef(char *name) {
     Node *node = map_get(env(), name);
     return (node && node->kind == AST_TYPEDEF) ? node->ty : NULL;
@@ -1513,8 +1524,13 @@ static Dict *read_rectype_fields(int *rsize, int *align, bool is_struct) {
     return update_union_offset(rsize, align, fields);
 }
 
+// TODO 这里是在做什么
 static Type *read_rectype_def(bool is_struct) {
+    // 读取结构的名字
+    // 如 struct Foo {}; 那么 tag = "Foo"
+    // 如 typedef struct Bar {}; 那么 tag = "Bar"
     char *tag = read_rectype_tag();
+    // printf(">>>> tag = %s\n", tag);
     Type *r;
     if (tag) {
         r = map_get(tags, tag);
@@ -2031,20 +2047,25 @@ static Type *read_decl_spec(int *rsclass) {
     if (!is_type(tok)) // 这里期待下一个 Token 是个类型标识符
         errort(tok, "type name expected, but got %s", tok2s(tok));
 
+    // 表示是否是用户自定义类型, typedef 的基础类型也是 usertype
     Type *usertype = NULL;
+    // 匿名枚举, 表示类型
     enum { kvoid = 1, kbool, kchar, kint, kfloat, kdouble } kind = 0;
+    // 匿名枚举, 表示对象大小
     enum { kshort = 1, klong, kllong } size = 0;
+    // 匿名枚举, 表示有无符号
     enum { ksigned = 1, kunsigned } sig = 0;
     int align = -1;
 
     for (;;) {
-        tok = get();
+        tok = get(); // 获取下一个 Token
         if (tok->kind == EOF)
             error("premature end of input");
         if (kind == 0 && tok->kind == TIDENT && !usertype) {
-            Type *def = get_typedef(tok->sval);
+            Type *def = get_typedef(tok->sval); // 测试一下这个 Token 是不是被 typedef 的类型
             if (def) {
-                if (usertype) goto err;
+                assert(usertype == false); // NOTE 添加一个 assert 验证下面的判断
+                if (usertype) goto err;    // TODO 这个 if 应该永远为 False, 上面的 if 已经判了
                 usertype = def;
                 goto errcheck;
             }
@@ -2725,6 +2746,8 @@ Vector *read_toplevels() {
  */
 
 // C11 5.1.1.2p6 Adjacent string literal tokens are concatenated.
+// 合并连续的字符串 Token
+// 例子: "hello", ", " "world" 合并为 "hello, world"
 static void concatenate_string(Token *tok) {
     int enc = tok->enc;
     Buffer *b = make_buffer();
@@ -2742,8 +2765,13 @@ static void concatenate_string(Token *tok) {
     tok->sval = buf_body(b);
     tok->slen = buf_len(b);
     tok->enc = enc;
+    //printf("tok->sval = %s\n", tok->sval); // NOTE 取消注释可以看到 Token 合并的结果
 }
 
+// 获取下一个 Token, 如果接下来 Token 都是字符串类型
+// 那么把它们合并为一个字符串 Token
+// 例如 char* s = "hello" ", " "world";
+// 后三个字符串会合并为 "hello, world"
 static Token *get() {
     Token *r = read_token();
     if (r->kind == TINVALID)
