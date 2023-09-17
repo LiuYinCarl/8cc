@@ -385,6 +385,11 @@ static Type* make_rectype(bool is_struct) {
     return make_type(&(Type){ KIND_STRUCT, .is_struct = is_struct });
 }
 
+// 创建函数返回类型
+// rettype     : 返回值类型
+// paramtypes  : 参数类型列表
+// has_varargs : 是否有可变参数
+// oldstyle    : 是否是旧式(K&R style) 函数定义
 static Type* make_func_type(Type *rettype, Vector *paramtypes, bool has_varargs, bool oldstyle) {
     return make_type(&(Type){
         KIND_FUNC,
@@ -394,6 +399,7 @@ static Type* make_func_type(Type *rettype, Vector *paramtypes, bool has_varargs,
         .oldstyle = oldstyle });
 }
 
+// 创建一个虚拟类型，因为当前还没有办法确定类型
 static Type *make_stub_type() {
     return make_type(&(Type){ KIND_STUB });
 }
@@ -1833,6 +1839,10 @@ static Vector *read_decl_init(Type *ty) {
  * of a function or an array.
  */
 
+// 读取一个函数参数
+// name     : 参数名
+// optional : 是否参数只给出类型, 没有给出名字
+// 返回值   : 参数的类型
 static Type *read_func_param(char **name, bool optional) {
     int sclass = 0;
     Type *basety = type_int;
@@ -1854,7 +1864,13 @@ static Type *read_func_param(char **name, bool optional) {
 }
 
 // Reads an ANSI-style prototyped function parameter list.
+// types    : 参数类型列表
+// vars     : 参数名列表
+// ellipsis : 是否含有可变参数
 static void read_declarator_params(Vector *types, Vector *vars, bool *ellipsis) {
+    // 是否这个参数只定义了类型,在函数声明的时候，可以只申明类型不给出参数名
+    // 如 void func(int, char, bool);
+    // 在定义的时候才给出参数名
     bool typeonly = !vars;
     *ellipsis = false;
     for (;;) {
@@ -1868,6 +1884,7 @@ static void read_declarator_params(Vector *types, Vector *vars, bool *ellipsis) 
         }
         char *name;
         Type *ty = read_func_param(&name, typeonly);
+        // 确保不是 void 类型
         ensure_not_void(ty);
         vec_push(types, ty);
         if (!typeonly)
@@ -1894,10 +1911,12 @@ static void read_declarator_params_oldstyle(Vector *vars) {
     }
 }
 
+// 解析函数的参数列表
 static Type *read_func_param_list(Vector *paramvars, Type *rettype) {
     // C11 6.7.6.3p10: A parameter list with just "void" specifies that
     // the function has no parameters.
     Token *tok = get();
+    // 如果参数列表只有一个 void 参数
     if (is_keyword(tok, KVOID) && next_token(')'))
         return make_func_type(rettype, make_vector(), false, false);
 
@@ -1905,21 +1924,27 @@ static Type *read_func_param_list(Vector *paramvars, Type *rettype) {
     // function definition having no parameters.
     // We return a type representing K&R-style declaration here.
     // If this is actually part of a declartion, the type will be fixed later.
+    // 参数列表为空, 表示参数数量是任意个, 见 example/parse_4.c
     if (is_keyword(tok, ')'))
         return make_func_type(rettype, make_vector(), true, true);
     unget_token(tok);
 
     Token *tok2 = peek();
+    // 第一个参数不允许是 "..."
     if (next_token(KELLIPSIS))
         errort(tok2, "at least one parameter is required before \"...\"");
     if (is_type(peek())) {
-        bool ellipsis;
-        Vector *paramtypes = make_vector();
+        bool ellipsis; // 是否含有可变参数列表
+        Vector *paramtypes = make_vector(); // 参数类型列表
+        // 解析函数定义的参数列表, paramvars 表示形参名列表
         read_declarator_params(paramtypes, paramvars, &ellipsis);
         return make_func_type(rettype, paramtypes, ellipsis, false);
     }
+    // 如果没有一个形参，那一定是错误的函数定义
     if (!paramvars)
         errort(tok, "invalid function definition");
+    // 如果有形参名，那说明是 K&R 风格的函数定义
+    // 例子参考 example/parse_4.c
     read_declarator_params_oldstyle(paramvars);
     Vector *paramtypes = make_vector();
     for (int i = 0; i < vec_len(paramvars); i++)
@@ -1963,6 +1988,10 @@ static void skip_type_qualifiers() {
 }
 
 // C11 6.7.6: Declarators
+// rname: 函数名
+// basety: 函数返回值的类型?
+// params: 函数参数列表
+// ctx: TODO 不知道是啥
 static Type *read_declarator(char **rname, Type *basety, Vector *params, int ctx) {
     if (next_token('(')) {
         // '(' is either beginning of grouping parentheses or of a function parameter list.
@@ -1976,8 +2005,10 @@ static Type *read_declarator(char **rname, Type *basety, Vector *params, int ctx
         // Here, we pass a dummy object to get "pointer to <something>" first,
         // continue reading to get "function returning int", and then combine them.
         Type *stub = make_stub_type();
+        // 解析函数指针的名称部分, 如 int (*)() 中的 "(*"
         Type *t = read_declarator(rname, stub, params, ctx);
         expect(')');
+        //  阅读函数指针的参数列表部分, 如 int(*)() 中的 "()"
         *stub = *read_declarator_tail(basety, params);
         return t;
     }
@@ -2382,6 +2413,7 @@ static Node *read_funcdef() {
     labels = make_map();
     char *name;
     Vector *params = make_vector();
+    // 解析函数定义
     Type *functype = read_declarator(&name, basetype, params, DECL_BODY);
     if (functype->oldstyle) {
         if (vec_len(params) == 0)
@@ -2392,6 +2424,7 @@ static Node *read_funcdef() {
     functype->isstatic = (sclass == S_STATIC);
     ast_gvar(functype, name);
     expect('{');
+    // 解析函数体
     Node *r = read_func_body(functype, name, params);
     backfill_labels();
     localenv = NULL;
