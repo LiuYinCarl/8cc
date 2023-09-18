@@ -119,7 +119,7 @@ enum {
 /*
  * Source location
  */
-
+// 存储当前文件和行号信息到 source_loc
 static void mark_location() {
     Token *tok = peek();
     source_loc = malloc(sizeof(SourceLoc));
@@ -185,6 +185,7 @@ static Node *ast_floattype(Type *ty, double val) {
     return make_ast(&(Node){ AST_LITERAL, ty, .fval = val });
 }
 
+// 把一个局部变量存入 localenv 和 localvars
 static Node *ast_lvar(Type *ty, char *name) {
     Node *r = make_ast(&(Node){ AST_LVAR, ty, .varname = name });
     if (localenv)
@@ -193,8 +194,9 @@ static Node *ast_lvar(Type *ty, char *name) {
         vec_push(localvars, r);
     return r;
 }
-
+// 把一个全局变成存入 globalenv
 static Node *ast_gvar(Type *ty, char *name) {
+    // 检查重复定义
     Node *r = make_ast(&(Node){ AST_GVAR, ty, .varname = name, .glabel = name });
     map_put(globalenv, name, r);
     return r;
@@ -1295,7 +1297,7 @@ static Node *read_assignment_expr() {
     Token *tok = get();
     if (!tok)
         return node;
-    if (is_keyword(tok, '?'))
+    if (is_keyword(tok, '?')) // 三元表达式
         return do_read_conditional_expr(node);
     int cop = get_compound_assign_op(tok);
     if (is_keyword(tok, '=') || cop) {
@@ -1806,7 +1808,8 @@ static void read_initializer_list(Vector *inits, Type *ty, int off, bool designa
         read_array_initializer(inits, arraytype, off, designated);
     }
 }
-
+// 解析定义的初始化内容
+// 例如 int a = 10 中的 "10'
 static Vector *read_decl_init(Type *ty) {
     Vector *r = make_vector();
     if (is_keyword(peek(), '{') || is_string(ty)) {
@@ -2012,6 +2015,7 @@ static Type *read_declarator(char **rname, Type *basety, Vector *params, int ctx
         *stub = *read_declarator_tail(basety, params);
         return t;
     }
+    // 如果是一个指针标识符
     if (next_token('*')) {
         skip_type_qualifiers();
         return read_declarator(rname, make_ptr_type(basety), params, ctx);
@@ -2213,7 +2217,7 @@ static Type *read_decl_spec(int *rsclass) {
 /*
  * Declaration
  */
-
+// 解析一个 static 局部变量
 static void read_static_local_var(Type *ty, char *name) {
     Node *var = ast_static_lvar(ty, name);
     Vector *init = NULL;
@@ -2233,6 +2237,8 @@ static Type *read_decl_spec_opt(int *sclass) {
     return type_int;
 }
 
+// NOTE 这里存在一个问题, 就是没有检查变量的重复定义
+// 完整例子参考 example/parse_5.c
 static void read_decl(Vector *block, bool isglobal) {
     int sclass = 0;
     Type *basetype = read_decl_spec_opt(&sclass);
@@ -2246,13 +2252,16 @@ static void read_decl(Vector *block, bool isglobal) {
             ast_typedef(ty, name);
         } else if (ty->isstatic && !isglobal) {
             ensure_not_void(ty);
+            // 解析 static 局部变量
             read_static_local_var(ty, name);
         } else {
             ensure_not_void(ty);
             Node *var = (isglobal ? ast_gvar : ast_lvar)(ty, name);
             if (next_token('=')) {
+                // 带初始化的定义
                 vec_push(block, ast_decl(var, read_decl_init(ty)));
             } else if (sclass != S_EXTERN && ty->kind != KIND_FUNC) {
+                // 不带初始化的定义
                 vec_push(block, ast_decl(var, NULL));
             }
         }
@@ -2318,7 +2327,9 @@ static Vector *param_types(Vector *params) {
 /*
  * Function definition
  */
-
+// functype : 函数类型
+// fname    : 函数名
+// params   : 函数参数列表
 static Node *read_func_body(Type *functype, char *fname, Vector *params) {
     localenv = make_map_parent(localenv);
     localvars = make_vector();
@@ -2389,6 +2400,7 @@ static bool is_funcdef() {
     return r;
 }
 
+// 回填 goto lables
 static void backfill_labels() {
     for (int i = 0; i < vec_len(gotos); i++) {
         Node *src = vec_get(gotos, i);
@@ -2426,6 +2438,7 @@ static Node *read_funcdef() {
     expect('{');
     // 解析函数体
     Node *r = read_func_body(functype, name, params);
+    // TODO 回填 Label?
     backfill_labels();
     localenv = NULL;
     return r;
@@ -2756,16 +2769,20 @@ static Node *read_compound_stmt() {
     return ast_compound_stmt(list);
 }
 
+// 解析定义或者语句
 static void read_decl_or_stmt(Vector *list) {
     Token *tok = peek();
     if (tok->kind == TEOF)
         error("premature end of input");
     mark_location();
     if (is_type(tok)) {
+        // 如果当前 Token 是一个类型，那么接下来就是一个定义
         read_decl(list, false);
     } else if (next_token(KSTATIC_ASSERT)) {
+        // 当前 Token 是一个 _Static_assert
         read_static_assert();
     } else {
+        // 否则就一定是个语句
         Node *stmt = read_stmt();
         if (stmt)
             vec_push(list, stmt);

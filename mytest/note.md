@@ -15,7 +15,7 @@
 4. 8cc 的 AST 和符号表有什么关系
 5. 8cc 如何依赖 AST 来生成汇编代码
 6. 8cc 生成汇编代码时如何处理条件/分支/循环语句
-
+7. 8cc AST 的合法性检查是如何处理的
 
 ## 时序图
 
@@ -101,11 +101,35 @@ read_toplevels
 |  |
 |  |+ make_map_parent(globalenv) 创建局部作用域，父作用域为 globalenv
 |  |
-|  |+ read_declarator() 读取函数定义(TODO: 这里有一个新旧式函数定义的区别)
+|  |+ read_declarator() 解析函数定义(TODO: 这里有一个新旧式函数定义的区别)
+|  |  |
+|  |  |- read_declarator_func() 解析函数定义
+|  |  |  |
+|  |  |  |- read_func_param_list() 解析参数列表
+|  |  |
+|  |  |- read_declarator() 解析函数指针的名称部分
+|  |  |
+|  |  |- read_declarator_tail() 解析函数指针的参数列表部分
 |  |
 |  |+ ast_gvar(functype, name) 函数名存入 globalenv
 |  |
 |  |? read_func_body(functype, name, params) 读取函数体定义
+|  |  |
+|  |  |+ make_map_parent() 创建局部作用域 localenv,但是只保存了函数名
+|  |  |
+|  |  |+ make_vector() 创建局部变量列表
+|  |  |
+|  |  |+ read_compound_stmt() 解析函数体
+|  |  |  |
+|  |  |  |+ make_map_parent(localenv) 创建函数内的局部变量
+|  |  |  |
+|  |  |  |+ make_vector() 创建一个 list 列表
+|  |  |  |
+|  |  |  |+ read_decl_or_stmt(list)
+|  |  |  |
+|  |  |  |+ ast_compound_stmt(list)
+|  |  |
+|  |  |+ ast_func(functype, fname, params, body, localvars) 构建函数 AST 节点
 |  |
 |  |+ backfill_labels() 填充 labels(用于 goto)
 |
