@@ -186,7 +186,7 @@ typedef struct Type {
     // function
     struct Type *rettype;
     Vector *params;
-    bool hasva;
+    bool hasva; // 这里表示函数是否存在可变参数?
     bool oldstyle;
 } Type;
 

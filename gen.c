@@ -16,7 +16,7 @@ static char *SREGS[] = {"dil", "sil", "dl", "cl", "r8b", "r9b"};
 static char *MREGS[] = {"edi", "esi", "edx", "ecx", "r8d", "r9d"};
 static int TAB = 8;
 static Vector *functions = &EMPTY_VECTOR;
-static int stackpos;
+static int stackpos; // TODO 这个是什么
 static int numgp;
 static int numfp;
 static FILE *outputfp;
@@ -130,6 +130,7 @@ static char *get_load_inst(Type *ty) {
     }
 }
 
+// 取最小的 >= n 且是 m 整倍数的值
 static int align(int n, int m) {
     int rem = n % m;
     return (rem == 0) ? n : n - rem + m;
@@ -690,6 +691,9 @@ static void emit_post_inc_dec(Node *node, char *op) {
     pop("rax");
 }
 
+// 统计函数调用需要的各类型寄存器数量
+// numfp 应该是浮点寄存器数量
+// numgp 应该是常规寄存器数量
 static void set_reg_nums(Vector *args) {
     numgp = numfp = 0;
     for (int i = 0; i < vec_len(args); i++) {
@@ -714,6 +718,7 @@ static void emit_jmp(char *label) {
     emit("jmp %s", label);
 }
 
+// 生成 AST 字面量节点的汇编
 static void emit_literal(Node *node) {
     SAVE;
     switch (node->ty->kind) {
@@ -1202,7 +1207,7 @@ static void emit_computed_goto(Node *node) {
     emit_expr(node->operand);
     emit("jmp *#rax");
 }
-
+// 生成表达式的汇编
 static void emit_expr(Node *node) {
     SAVE;
     maybe_print_source_loc(node);
@@ -1419,6 +1424,9 @@ static void emit_global_var(Node *v) {
         emit_bss(v);
 }
 
+// 把所有的寄存器都保存在函数函数栈中
+// TODO 这个操作有什么用处
+// 例子见 example/gen_1.c
 static int emit_regsave_area() {
     emit("sub $%d, #rsp", REGAREA_SIZE);
     emit("mov #rdi, (#rsp)");
@@ -1438,18 +1446,27 @@ static int emit_regsave_area() {
     return REGAREA_SIZE;
 }
 
+// 生成函数参数
 static void push_func_params(Vector *params, int off) {
     int ireg = 0;
     int xreg = 0;
-    int arg = 2;
+    int arg = 2; // TODO 这里为什么初始值是 2
     for (int i = 0; i < vec_len(params); i++) {
         Node *v = vec_get(params, i);
+        // 如果参数是 struct 类型
         if (v->ty->kind == KIND_STRUCT) {
+            // 将栈内数据复制到 rax 寄存器
             emit("lea %d(#rbp), #rax", arg * 8);
+            // 将 struct 参数入栈
+            // 例子见 example/gen2.c
             int size = push_struct(v->ty->size);
             off -= size;
             arg += size / 8;
+        // 如果参数是浮点数
         } else if (is_flotype(v->ty)) {
+            // 如果 xreg 使用超过了 8 个，那么剩下的参数
+            // 一定存储在父函数的栈中,需要移动到当前函数栈
+            // 否则，从寄存器中移动到当前函数栈中
             if (xreg >= 8) {
                 emit("mov %d(#rbp), #rax", arg++ * 8);
                 push("rax");
@@ -1477,14 +1494,18 @@ static void push_func_params(Vector *params, int off) {
     }
 }
 
+// 生成函数的准备代码或者说入口代码
 static void emit_func_prologue(Node *func) {
     SAVE;
     emit(".text");
+    // 非 static 的函数需要加一个 .global 标记
     if (!func->ty->isstatic)
         emit_noindent(".global %s", func->fname);
     emit_noindent("%s:", func->fname);
     emit("nop");
+    // 将父函数的 rbp 值存入栈底
     push("rbp");
+    // 将父函数的 rsp 值存入 rbp，此时 rbp 是子函数的栈底
     emit("mov #rsp, #rbp");
     int off = 0;
     if (func->ty->hasva) {
@@ -1495,6 +1516,7 @@ static void emit_func_prologue(Node *func) {
     off -= vec_len(func->params) * 8;
 
     int localarea = 0;
+    // 为函数的局部变量分配栈空间
     for (int i = 0; i < vec_len(func->localvars); i++) {
         Node *v = vec_get(func->localvars, i);
         int size = align(v->ty->size, 8);
@@ -1509,6 +1531,7 @@ static void emit_func_prologue(Node *func) {
     }
 }
 
+// AST 生成汇编代码入口
 void emit_toplevel(Node *v) {
     stackpos = 8;
     if (v->kind == AST_FUNC) {

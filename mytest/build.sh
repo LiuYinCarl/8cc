@@ -4,7 +4,7 @@ cd ..
 
 make clean
 
-make -j2
+bear make -j2
 
 cd ./mytest
 
