@@ -179,6 +179,7 @@ int main(int argc, char **argv) {
     if (cpponly)
         preprocess();
 
+    // 将代码转化为 AST 并存储在 toplevels
     Vector *toplevels = read_toplevels();
     for (int i = 0; i < vec_len(toplevels); i++) {
         Node *v = vec_get(toplevels, i);

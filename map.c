@@ -37,6 +37,7 @@ static void maybe_rehash(Map *m) {
         m->size = INIT_SIZE;
         return;
     }
+    // 如果已经用掉的槽位小于总槽位的 70%，不扩容
     if (m->nused < m->size * 0.7)
         return;
     int newsize = (m->nelem < m->size * 0.35) ? m->size : m->size * 2;
@@ -97,6 +98,7 @@ void map_put(Map *m, char *key, void *val) {
     int i = hash(key) & mask;
     for (;; i = (i + 1) & mask) {
         char *k = m->key[i];
+        // 找到一个空槽位或者被曾经被使用但是后面被删除了的槽位
         if (k == NULL || k == TOMBSTONE) {
             m->key[i] = key;
             m->val[i] = val;
@@ -105,6 +107,7 @@ void map_put(Map *m, char *key, void *val) {
                 m->nused++;
             return;
         }
+        // 如果找到了一样的 key，那更新值就好了
         if (!strcmp(k, key)) {
             m->val[i] = val;
             return;
