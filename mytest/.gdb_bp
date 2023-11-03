@@ -1,3 +1,1 @@
-break main
-break parse.c:read_funcdef
-break parse.c:read_toplevels
+break read_funclike_macro_body

@@ -38,7 +38,7 @@ typedef struct {
 typedef struct {
     MacroType kind;
     int nargs;
-    Vector *body;
+    Vector *body; // type of element is Token*
     bool is_varg;
     SpecialMacroHandler *fn;
 } Macro;
@@ -80,6 +80,7 @@ static Macro *make_special_macro(SpecialMacroHandler *fn) {
     return make_macro(&(Macro){ MACRO_SPECIAL, .fn = fn });
 }
 
+// 按照位置保存宏参数
 static Token *make_macro_token(int position, bool is_vararg) {
     Token *r = malloc(sizeof(Token));
     r->kind = TMACRO_PARAM;
@@ -97,6 +98,7 @@ static Token *copy_token(Token *tok) {
     return r;
 }
 
+// 判断下一个关键字是否是 id, 不回退
 static void expect(char id) {
     Token *tok = lex();
     if (!is_keyword(tok, id))
@@ -106,11 +108,14 @@ static void expect(char id) {
 /*
  * Utility functions
  */
-
+// 判断一个 Token 是不是标识符并且等于 s
 bool is_ident(Token *tok, char *s) {
     return tok->kind == TIDENT && !strcmp(tok->sval, s);
 }
 
+// 判断下一个 Token 是不是等于关键字 id
+// 如果是，则返回 True 并消耗下一个 Token
+// 否则返回 False 并回退 Token
 static bool next(int id) {
     Token *tok = lex();
     if (is_keyword(tok, id))
@@ -119,6 +124,7 @@ static bool next(int id) {
     return false;
 }
 
+// 将 tokens Vector 中的第一个 Token 的 space 属性设置为 tmpl->space
 static void propagate_space(Vector *tokens, Token *tmpl) {
     if (vec_len(tokens) == 0)
         return;
@@ -131,6 +137,7 @@ static void propagate_space(Vector *tokens, Token *tmpl) {
  * Macro expander
  */
 
+// 读取一个类型为标识符的 Token
 static Token *read_ident() {
     Token *tok = lex();
     if (tok->kind != TIDENT)
@@ -138,32 +145,47 @@ static Token *read_ident() {
     return tok;
 }
 
+// 跳过一个换行符
 void expect_newline() {
     Token *tok = lex();
     if (tok->kind != TNEWLINE)
         errort(tok, "newline expected, but got %s", tok2s(tok));
 }
-
+// 读取一个参数
+// 返回值：
 static Vector *read_one_arg(Token *ident, bool *end, bool readall) {
+    // TODO 这个是什么
     Vector *r = make_vector();
+    // 括号的层级
     int level = 0;
     for (;;) {
+        // 读取一个 Token
         Token *tok = lex();
+        // 如果是 EOF，报错
         if (tok->kind == TEOF)
             errort(ident, "unterminated macro argument list");
+        // 如果是换行符，进入下一次循环
         if (tok->kind == TNEWLINE)
             continue;
+        // 如果是行的开头并且 Token 是 '#', 那么读取宏定义并且进入下一次循环
         if (tok->bol && is_keyword(tok, '#')) {
             read_directive(tok);
             continue;
         }
+        // 如果不在嵌套的小括号内并且 Token 是 ')',
+        // 那么回退这个 Token, 并且设置 end 值为 true(这是最外层的')',很明显到了定义的尾部)
+        // 返回 r
         if (level == 0 && is_keyword(tok, ')')) {
             unget_token(tok);
             *end = true;
             return r;
         }
+        // 如果不在嵌套的小括号内并且 Token 是 ',' 并且 readall 是 false
+        // 返回 r
+        // 这里读到了 ',' 并且不在内层的小括号中, 说明在这里第一个参数被读取完
         if (level == 0 && is_keyword(tok, ',') && !readall)
             return r;
+        // '(' ')' 都不是参数，所以不会被作为 Token 读入 r
         if (is_keyword(tok, '('))
             level++;
         if (is_keyword(tok, ')'))
@@ -174,26 +196,35 @@ static Vector *read_one_arg(Token *ident, bool *end, bool readall) {
         // but the difference of newline and space is observable
         // if you stringize tokens using #.
         if (tok->bol) {
-            tok = copy_token(tok);
+            tok = copy_token(tok); // 这句应该是多余的
             tok->bol = false;
             tok->space = true;
         }
+        // 把当前 Token 放到 r
         vec_push(r, tok);
     }
 }
 
+// 读取多个宏参数
 static Vector *do_read_args(Token *ident, Macro *macro) {
+    // 参数列表
     Vector *r = make_vector();
+    // 是否读取完所有参数
     bool end = false;
     while (!end) {
+        // TODO 为什么需要判断是否在省略号内
         bool in_ellipsis = (macro->is_varg && vec_len(r) + 1 == macro->nargs);
         vec_push(r, read_one_arg(ident, &end, in_ellipsis));
     }
+    // TODO 为什么在可变参数的情况下需要补齐参数数量，是不是因为可变参数默认不当作一个参数，所以需要手动填充？
     if (macro->is_varg && vec_len(r) == macro->nargs - 1)
         vec_push(r, make_vector());
     return r;
 }
 
+// 读取宏参数
+// 如果一个宏 M 没有参数，那么它的参数列表就是一个空 Vector
+// 如果一个宏 M 有一个参数，那么它的参数列表是一个包含一个空 Vector 的 Vector
 static Vector *read_args(Token *tok, Macro *macro) {
     if (macro->nargs == 0 && is_keyword(peek_token(), ')')) {
         // If a macro M has no parameter, argument list of M()
@@ -207,6 +238,8 @@ static Vector *read_args(Token *tok, Macro *macro) {
     return args;
 }
 
+// 添加隐藏集
+// 将 tokens 中的每个 Token 的隐藏集和 hideset 做并集
 static Vector *add_hide_set(Vector *tokens, Set *hideset) {
     Vector *r = make_vector();
     for (int i = 0; i < vec_len(tokens); i++) {
@@ -217,6 +250,7 @@ static Vector *add_hide_set(Vector *tokens, Set *hideset) {
     return r;
 }
 
+// 连接 Token t 和 u 并返回一个新的 Token
 static Token *glue_tokens(Token *t, Token *u) {
     Buffer *b = make_buffer();
     buf_printf(b, "%s", tok2s(t));
@@ -225,15 +259,18 @@ static Token *glue_tokens(Token *t, Token *u) {
     return r;
 }
 
+// 将 tokens Vector 的最后一个 Token 和 tok 连接起来
 static void glue_push(Vector *tokens, Token *tok) {
     Token *last = vec_pop(tokens);
     vec_push(tokens, glue_tokens(last, tok));
 }
 
+// 将 args Vector 中的 Token 合并成一个字符串保存在 tmpl 中并返回
 static Token *stringize(Token *tmpl, Vector *args) {
     Buffer *b = make_buffer();
     for (int i = 0; i < vec_len(args); i++) {
         Token *tok = vec_get(args, i);
+        // 如果 buffer 不为空并且 Token 有前缀空格，就往 buffer 里写一个空格
         if (buf_len(b) && tok->space)
             buf_printf(b, " ");
         buf_printf(b, "%s", tok2s(tok));
@@ -247,6 +284,7 @@ static Token *stringize(Token *tmpl, Vector *args) {
     return r;
 }
 
+// TODO
 static Vector *expand_all(Vector *tokens, Token *tmpl) {
     token_buffer_stash(vec_reverse(tokens));
     Vector *r = make_vector();
@@ -323,30 +361,45 @@ static void unget_all(Vector *tokens) {
         unget_token(vec_get(tokens, i));
 }
 
+// TODO 8cc 里预处理器用的地方比较奇怪
+// 它的流程如下
+// 如果扫描 Token 的过程中遇到了宏定义，就保存在 macros Map
+// 之后扫描其他 Token 的时候，每次检查这个 Token 是不是一个宏
+// 如果是的话，就进行替换
 // This is "expand" function in the Dave Prosser's document.
 static Token *read_expand_newline() {
     Token *tok = lex();
+    // 获取一个 Token, 如果不是标识符类型，直接返回
     if (tok->kind != TIDENT)
         return tok;
+    // 如果是标识符类型, 检查下这个名字是不是一个宏定义
     char *name = tok->sval;
     Macro *macro = map_get(macros, name);
+    // 如果不是一个宏或者是一个宏, 但是这个名字在它自己的隐藏集里(不用进行替换)
+    // 那也可以直接返回这个 Token
     if (!macro || set_has(tok->hideset, name))
         return tok;
 
     switch (macro->kind) {
     case MACRO_OBJ: {
+        // 把 Token 名字加到它自己的隐藏集里
         Set *hideset = set_add(tok->hideset, name);
         Vector *tokens = subst(macro, NULL, hideset);
         propagate_space(tokens, tok);
+        // 把所有 Token 回退
         unget_all(tokens);
+        // 重新读取一个 Token
         return read_expand();
     }
     case MACRO_FUNC: {
+        // TODO 为什么可以直接返回
         if (!next('('))
             return tok;
+        // 读取这个宏调用的所有参数
         Vector *args = read_args(tok, macro);
         Token *rparen = peek_token();
         expect(')');
+        // 计算当前 Token 和下一个 Token 的隐藏集的交集，并把当前 Token 的名字加入到交集中
         Set *hideset = set_add(set_intersection(tok->hideset, rparen->hideset), name);
         Vector *tokens = subst(macro, args, hideset);
         propagate_space(tokens, tok);
@@ -354,13 +407,18 @@ static Token *read_expand_newline() {
         return read_expand();
     }
     case MACRO_SPECIAL:
+        // 查找 define_special_macro 看各种特殊宏的定义
+        // 其实就是把宏(如 __FILE__)替换为了对应的信息, 然后塞回到 Token 缓冲
+        // 调用特殊宏对应的处理函数
         macro->fn(tok);
+        // 重新读取一个 Token
         return read_expand();
     default:
         error("internal error");
     }
 }
 
+// 读取一个新的 Token, 不包括换行
 static Token *read_expand() {
     for (;;) {
         Token *tok = read_expand_newline();
@@ -369,27 +427,41 @@ static Token *read_expand() {
     }
 }
 
+// 处理宏参数
+// 例子见 example/cpp_1.c
 static bool read_funclike_macro_params(Token *name, Map *param) {
+    // 当前在处理第几个参数
     int pos = 0;
     for (;;) {
+        // 读取下一个 Token
         Token *tok = lex();
+        // 读到右括号
         if (is_keyword(tok, ')'))
             return false;
         if (pos) {
+            // 如果读到的不是 ',' 说明语法错误
             if (!is_keyword(tok, ','))
                 errort(tok, ", expected, but got %s", tok2s(tok));
+            // 丢掉 ',' 读取下一个 Token
             tok = lex();
         }
+        // 如果读到换行 Token, 说明语法错误
         if (tok->kind == TNEWLINE)
             errort(name, "missing ')' in macro parameter list");
+        // 如果读到省略号 Token, 那么在 param Map 中增加一个可变参数键值对
         if (is_keyword(tok, KELLIPSIS)) {
             map_put(param, "__VA_ARGS__", make_macro_token(pos++, true));
+            // 可变参数的下一个 Token 应该是右括号
             expect(')');
             return true;
         }
+        // 如果读到的不是标识符，说明语法错误
         if (tok->kind != TIDENT)
             errort(tok, "identifier expected, but got %s", tok2s(tok));
         char *arg = tok->sval;
+        // 如果接下来是省略号 Token 和右括号, 那么在 param Map 中增加一个 key 为
+        // arg 的键值对
+        // TODO 例子是什么
         if (next(KELLIPSIS)) {
             expect(')');
             map_put(param, arg, make_macro_token(pos++, true));
@@ -399,6 +471,7 @@ static bool read_funclike_macro_params(Token *name, Map *param) {
     }
 }
 
+// 检查 '##' 的位置是不是合法，不能出现宏展开的开头或者结尾
 static void hashhash_check(Vector *v) {
     if (vec_len(v) == 0)
         return;
@@ -408,13 +481,16 @@ static void hashhash_check(Vector *v) {
         errort(vec_tail(v), "'##' cannot appear at end of macro expansion");
 }
 
+// 读带参数的宏定义的替换部分
 static Vector *read_funclike_macro_body(Map *param) {
     Vector *r = make_vector();
     for (;;) {
         Token *tok = lex();
+        // 读到了换行符，说明宏定义结束了
         if (tok->kind == TNEWLINE)
             return r;
         if (tok->kind == TIDENT) {
+            // TODO 这里是在进行宏拓展吗
             Token *subst = map_get(param, tok->sval);
             if (subst) {
                 subst = copy_token(subst);
@@ -859,6 +935,7 @@ static void make_token_pushback(Token *tmpl, int kind, char *sval) {
     unget_token(tok);
 }
 
+// 把日期信息一个字符串变为一个 Token, 写回到 Token 缓冲
 static void handle_date_macro(Token *tmpl) {
     char buf[20];
     strftime(buf, sizeof(buf), "%b %e %Y", &now);

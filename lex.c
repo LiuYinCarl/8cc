@@ -70,7 +70,7 @@ static Pos get_pos(int delta) {
     return (Pos){ f->line, f->column + delta };
 }
 
-// 将 pos 设置位当前读到的文件位置
+// 将 pos 设置为当前读到的文件位置
 // TODO 这是为了错误回退？
 static void mark() {
     pos = get_pos(0);
@@ -181,6 +181,7 @@ static void skip_char() {
 
 static void skip_string() {
     for (int c = readc(); c != EOF && c != '"'; c = readc())
+        // 这里这个写法主要是为了过滤掉 '\"' 这种情况
         if (c == '\\')
             readc();
 }
@@ -193,6 +194,7 @@ static void skip_string() {
 void skip_cond_incl() {
     int nest = 0;
     for (;;) {
+        // 'bol' is 'begin of line'
         bool bol = (current_file()->column == 1);
         skip_space();
         int c = readc();
@@ -292,6 +294,7 @@ static bool is_valid_ucn(unsigned int c) {
 }
 
 // Reads \u or \U escape sequences. len is 4 or 8, respecitvely.
+// 关于 UCS 编码可以看 C11 标准的 6.4.3 节( Universal character names)
 static int read_universal_char(int len) {
     Pos p = get_pos(-2);
     unsigned int r = 0;
@@ -472,6 +475,7 @@ static Token *do_read_token() {
         return read_ident(c);
     case '0' ... '9':
         return read_number(c);
+        // u 后接 16 位字符, U 后接 32 位字符, u8 指 UTF-8 字符串
     case 'L': case 'U': {
         // Wide/char32_t character/string literal
         int enc = (c == 'L') ? ENC_WCHAR : ENC_CHAR32;
@@ -494,7 +498,7 @@ static Token *do_read_token() {
             return read_number(c);
         if (next('.')) {
             if (next('.'))
-                return make_keyword(KELLIPSIS);
+                return make_keyword(KELLIPSIS); // 连续三个 '.' 是省略号
             return make_ident("..");
         }
         return make_keyword('.');
@@ -600,7 +604,7 @@ void unget_token(Token *tok) {
 Token *lex_string(char *s) {
     stream_stash(make_file_string(s));
     Token *r = do_read_token();
-    next('\n');
+    next('\n'); // TODO 这句是什么意思
     Pos p = get_pos(0);
     if (peek() != EOF)
         errorp(p, "unconsumed input: %s", s);
