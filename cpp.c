@@ -15,10 +15,10 @@
 #include "8cc.h"
 
 static Map *macros = &EMPTY_MAP;
-static Map *once = &EMPTY_MAP;
+static Map *once = &EMPTY_MAP; // 使用了 #pragma once, 只允许 include 一次的文件
 static Map *keywords = &EMPTY_MAP;
-static Map *include_guard = &EMPTY_MAP;
-static Vector *cond_incl_stack = &EMPTY_VECTOR;
+static Map *include_guard = &EMPTY_MAP; // TODO ?
+static Vector *cond_incl_stack = &EMPTY_VECTOR; // TODO ?
 static Vector *std_include_path = &EMPTY_VECTOR;
 static struct tm now;
 static Token *cpp_token_zero = &(Token){ .kind = TNUMBER, .sval = "0" };
@@ -32,7 +32,7 @@ typedef struct {
     CondInclCtx ctx;
     char *include_guard;
     File *file;
-    bool wastrue;
+    bool wastrue; // TODO 这个表示什么
 } CondIncl;
 
 typedef struct {
@@ -503,6 +503,7 @@ static Vector *read_funclike_macro_body(Map *param) {
     }
 }
 
+// 解析 MACRO FUNCTION
 static void read_funclike_macro(Token *name) {
     Map *param = make_map();
     bool is_varg = read_funclike_macro_params(name, param);
@@ -512,6 +513,7 @@ static void read_funclike_macro(Token *name) {
     map_put(macros, name->sval, macro);
 }
 
+// 解析 MACRO OBJECT
 static void read_obj_macro(char *name) {
     Vector *body = make_vector();
     for (;;) {
@@ -528,6 +530,7 @@ static void read_obj_macro(char *name) {
  * #define
  */
 
+// 读取宏定义，根据宏名字后是不是有 '(' 判断是 MACRO FUNCTION 还是 MACRO OBJECT
 static void read_define() {
     Token *name = read_ident();
     Token *tok = lex();
@@ -552,7 +555,8 @@ static void read_undef() {
 /*
  * #if and the like
  */
-
+// 读取 #if/ifdef MACRO_NAME 格式
+// 返回这个宏是否被定义
 static Token *read_defined_op() {
     Token *tok = lex();
     if (is_keyword(tok, '(')) {
@@ -561,9 +565,11 @@ static Token *read_defined_op() {
     }
     if (tok->kind != TIDENT)
         errort(tok, "identifier expected, but got %s", tok2s(tok));
+    // 从宏 Map 中查找下这个宏是不是已经被定义
     return map_get(macros, tok->sval) ? cpp_token_one : cpp_token_zero;
 }
 
+// TODO 这里是在做替换？
 static Vector *read_intexpr_line() {
     Vector *r = make_vector();
     for (;;) {
@@ -705,7 +711,7 @@ static void read_warning(Token *hash) {
 /*
  * #include
  */
-
+// 将 args 中的参数合并成一个字符串
 static char *join_paths(Vector *args) {
     Buffer *b = make_buffer();
     for (int i = 0; i < vec_len(args); i++)
@@ -713,6 +719,7 @@ static char *join_paths(Vector *args) {
     return buf_body(b);
 }
 
+// 解析 #include 宏中的头文件名字
 static char *read_cpp_header_name(Token *hash, bool *std) {
     // Try reading a filename using a special tokenizer for #include.
     char *path = read_header_file_name(std);
@@ -744,6 +751,8 @@ static char *read_cpp_header_name(Token *hash, bool *std) {
     return join_paths(tokens);
 }
 
+// 检查一个文件是不是已经被包含过了
+// TODO 这是不是 8cc 自己的头文件
 static bool guarded(char *path) {
     char *guard = map_get(include_guard, path);
     bool r = (guard && map_get(macros, guard));
@@ -751,6 +760,8 @@ static bool guarded(char *path) {
     return r;
 }
 
+// 尝试 include 一个文件
+// TODO isimport 是啥
 static bool try_include(char *dir, char *filename, bool isimport) {
     char *path = fullpath(format("%s/%s", dir, filename));
     if (map_get(once, path))
@@ -769,17 +780,20 @@ static bool try_include(char *dir, char *filename, bool isimport) {
 static void read_include(Token *hash, File *file, bool isimport) {
     bool std;
     char *filename = read_cpp_header_name(hash, &std);
-    expect_newline();
+    expect_newline(); // TODO 为什么这里会需要读换行符
     if (filename[0] == '/') {
+        // 如果文件名以 '/' 开头，尝试从根目录下找
         if (try_include("/", filename, isimport))
             return;
         goto err;
     }
     if (!std) {
+        // 尝试从当前目录下找到这个头文件
         char *dir = file->name ? dirname(strdup(file->name)) : ".";
         if (try_include(dir, filename, isimport))
             return;
     }
+    // 尝试从各个标准目录下找到这个头文件
     for (int i = 0; i < vec_len(std_include_path); i++)
         if (try_include(vec_get(std_include_path, i), filename, isimport))
             return;

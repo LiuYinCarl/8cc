@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include "8cc.h"
 
+// 使用了 #progma enable_warning/disable_warning
 bool enable_warning = true;
 bool warning_is_error = false;
 
